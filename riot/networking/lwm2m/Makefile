@@ -21,6 +21,7 @@ USEMODULE += shell
 USEMODULE += shell_commands
 USEMODULE += ps
 USEMODULE += xtimer
+USEMODULE += lps331ap
 
 # Import lps331ap driver module
 

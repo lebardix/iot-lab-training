@@ -26,32 +26,34 @@
 #include "shell.h"
 #include "fmt.h"
 /* Include lpsxxx headers */
-
+#include "lpsxxx.h"
+#include "lpsxxx_params.h"
 
 /* Declate lpsxxx_t sensor variable (globally) */
+static lpsxxx_t sensor;
 
 /* Declare _value variable (globally) */
-
+static uint16_t _value = 0;
 
 static ssize_t _encode_link(const coap_resource_t *resource, char *buf,
                             size_t maxlen, coap_link_encoder_ctx_t *context);
 static ssize_t _riot_board_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len, void *ctx);
 /* Declare cpu handler */
-
+static ssize_t _riot_cpu_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len, void *ctx);
 /* Declare temperature handler */
-
+static ssize_t _temperature_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len, void *ctx);
 /* Declare value handler */
-
+static ssize_t _value_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len, void *ctx);
 
 /* CoAP resources. Must be sorted by path (ASCII order). */
 static const coap_resource_t _resources[] = {
     { "/riot/board", COAP_GET, _riot_board_handler, NULL },
     /* Add cpu resource */
-
+    { "/riot/cpu", COAP_GET, _riot_cpu_handler, NULL },
     /* Add temperature resource */
-
+    { "/temperature", COAP_GET, _temperature_handler, NULL },
     /* Add value resource */
-
+    { "/value", COAP_GET | COAP_PUT | COAP_POST, _value_handler, NULL },
 };
 
 static ssize_t _riot_board_handler(coap_pkt_t *pdu, uint8_t *buf, size_t len, void *ctx)
@@ -77,7 +79,19 @@ static ssize_t _riot_cpu_handler(coap_pkt_t *pdu, uint8_t *buf, size_t len, void
     (void)ctx;
 
     /* Implement cpu GET handler */
+    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
+    coap_opt_add_format(pdu, COAP_FORMAT_TEXT);
+    size_t resp_len = coap_opt_finish(pdu, COAP_OPT_FINISH_PAYLOAD);
 
+    /* write the RIOT board name in the response buffer */
+    if (pdu->payload_len >= strlen(RIOT_CPU)) {
+        memcpy(pdu->payload, RIOT_CPU, strlen(RIOT_CPU));
+        return resp_len + strlen(RIOT_CPU);
+    }
+    else {
+        puts("gcoap_cli: msg buffer too small");
+        return gcoap_response(pdu, buf, len, COAP_CODE_INTERNAL_SERVER_ERROR);
+    }
 }
 
 static ssize_t _temperature_handler(coap_pkt_t *pdu, uint8_t *buf, 
@@ -86,7 +100,26 @@ static ssize_t _temperature_handler(coap_pkt_t *pdu, uint8_t *buf,
     (void)ctx;
 
     /* Implement temperature GET handler */
+    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
+    coap_opt_add_format(pdu, COAP_FORMAT_TEXT);
+    size_t resp_len = coap_opt_finish(pdu, COAP_OPT_FINISH_PAYLOAD);
 
+    char response[32];
+    int16_t temp;
+    lpsxxx_read_temp(&sensor, &temp);
+    int temp_abs = temp / 100;
+    temp -= temp_abs * 100;
+    sprintf(response, "%2i.%02i°C",temp_abs, temp);
+
+    /* write the temperature value in the response buffer */
+    if (pdu->payload_len >= strlen(response)) {
+        memcpy(pdu->payload, response, strlen(response));
+    return resp_len + strlen(response);
+    }
+    else {
+    puts("gcoap: msg buffer too small");
+    return gcoap_response(pdu, buf, len, COAP_CODE_INTERNAL_SERVER_ERROR);
+    }
 }
 
 static ssize_t _value_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len, void *ctx)
@@ -94,7 +127,33 @@ static ssize_t _value_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len, void *c
     (void)ctx;
 
     /* Implement value GET|PUT|POST handler */
+/* read coap method type in packet */
+    unsigned method_flag = coap_method2flag(coap_get_code_detail(pdu));
+    switch(method_flag) {
+        case COAP_GET:
+            gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
+            coap_opt_add_format(pdu, COAP_FORMAT_TEXT);
+            size_t resp_len = coap_opt_finish(pdu, COAP_OPT_FINISH_PAYLOAD);
 
+            /* write the response buffer with the request count value */
+            resp_len += fmt_u16_dec((char *)pdu->payload, _value);
+            return resp_len;
+
+        case COAP_PUT:
+        case COAP_POST:
+            /* convert the payload to an integer and update the internal
+           value */
+            if (pdu->payload_len <= 5) {
+                char payload[6] = { 0 };
+                memcpy(payload, (char *)pdu->payload, pdu->payload_len);
+                _value = (uint16_t)strtoul(payload, NULL, 10);
+                return gcoap_response(pdu, buf, len, COAP_CODE_CHANGED);
+            }
+            else {
+                return gcoap_response(pdu, buf, len, COAP_CODE_BAD_REQUEST);
+            }
+    }
+    return 0;
 }
 
 static gcoap_listener_t _listener = {
@@ -132,7 +191,11 @@ static const shell_command_t shell_commands[] = {
 int main(void)
 {
     /* Initialize and enable the lps331ap device */
-
+    if (lpsxxx_init(&sensor, &lpsxxx_params[0]) != LPSXXX_OK) {
+        puts("LPS331AP initialization failed");
+        return 1;
+    }
+    lpsxxx_enable(&sensor);
     
     /* for the thread running the shell */
     msg_init_queue(_main_msg_queue, MAIN_QUEUE_SIZE);

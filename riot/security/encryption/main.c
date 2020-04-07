@@ -3,7 +3,10 @@
 #include <string.h>
 
 /* Add required includes here */
-
+#include "shell.h"
+#include "fmt.h"
+#include "crypto/ciphers.h"
+#include "crypto/modes/ctr.h"
 
 
 /* Intermediate encryption/decryption buffers  */
@@ -14,7 +17,15 @@ static uint8_t ctr_copy[16];
 
 
 /* Add here the key and the nonce */
+static const uint8_t key[] = {
+    0x23, 0xA0, 0x18, 0x53, 0xFA, 0xB3, 0x89, 0x23,
+    0x65, 0x89, 0x2A, 0xBC, 0x43, 0x99, 0xCC, 0x00
+};
 
+static const uint8_t ctr[] = {
+    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7,
+    0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
+};
 
 /* Implement the encrypt command handler here */
 static int _encrypt_handler(int argc, char **argv)
@@ -31,10 +42,13 @@ static int _encrypt_handler(int argc, char **argv)
     memcpy(ctr_copy, ctr, 16);
 
     /* Encrypt the message */
-
+    cipher_t cipher;
+    cipher_init(&cipher, CIPHER_AES_128, key, sizeof(key));
+    size_t enc_len = cipher_encrypt_ctr(&cipher, ctr_copy, 0, (uint8_t *)argv[1], strlen(argv[1]), data);
 
     /* Convert the byte array to a string of hex characters */
-
+    size_t len = fmt_bytes_hex(buf_str, data, enc_len);
+    buf_str[len] = 0;
 
     /* Print the result */
     printf("%s\n", buf_str);
@@ -57,10 +71,13 @@ static int _decrypt_handler(int argc, char **argv)
     memcpy(ctr_copy, ctr, 16);
 
     /* Convert encrypt message from hex string to byte array */
-
+    size_t len = fmt_hex_bytes(data, argv[1]);
 
     /* Decrypt the message */
-
+    cipher_t cipher;
+    cipher_init(&cipher, CIPHER_AES_128, key, sizeof(key));
+    cipher_decrypt_ctr(&cipher, ctr_copy, 0, data, len, (uint8_t *)buf_str);
+    buf_str[len] = 0;
 
     /* Print the result */
     printf("%s\n", buf_str);
